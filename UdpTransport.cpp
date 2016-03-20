@@ -1,6 +1,7 @@
 #include "UdpTransport.h"
 #include <iostream>
 #include <sys/socket.h>
+#include <errno.h>
 
 using namespace std;
 
@@ -35,6 +36,16 @@ int UdpTransport::recv(char *buff, unsigned int buf_len)
 
 	recvLen = recvfrom(_socket,buff, buf_len, 0, (struct sockaddr*)&addr, (socklen_t*)&addrLen);
 
+    if (-1 == recvLen)
+    {
+        cout << strerror(errno) << endl;
+    }
+    // for debug 
+    for (int i = 0; i < recvLen; i++)
+    {
+        printf("%02x ",buff[i]);
+    }
+    printf("\n");
 	if (!connected)
 	{
 		_dstAddr = addr;

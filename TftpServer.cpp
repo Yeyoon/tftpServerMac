@@ -1,5 +1,5 @@
 #include "TftpServer.h"
-
+#include <arpa/inet.h>
 #include <fstream>
 #include <iostream>
 
@@ -73,7 +73,8 @@ int TftpServ::sendBlockData(int len)
 	memmove(m_buff + 4, m_buff, len);
 	packet = (tftpPacket*)m_buff;
 	packet->opCode = TFTPOPCODE_DATA;
-	packet->packetContent.data.block = m_blockNumber;
+    DATA* data = (DATA*)((char*)packet + sizeof(packet->opCode));
+    data->block = htons(m_blockNumber);
 
 	if (m_pTransport->send(m_buff, len+4))	  // total len is datalen + 4
 	{
@@ -85,7 +86,6 @@ int TftpServ::sendBlockData(int len)
 
 bool TftpServ::handleWrq(WRQ* wrq)
 {
-	wrq->mode = wrq->filename + strlen(wrq->filename);
 	if (m_file)
 	{
 		sendError(TFTPERR_FILE_ALREADY_EXISTS,"duplicate write request");
@@ -99,16 +99,19 @@ bool TftpServ::handleWrq(WRQ* wrq)
 		return false;
 	}
 
-	return sendAck();
+	//return 4 == sendAck();
+    sendAck();
+    return true;
 }
 
 int TftpServ::sendError(tftpErrorCode_e e, char* errMsg)
 {
 	tftpPacket* p = (tftpPacket*)m_buff;
 	p->opCode = TFTPOPCODE_ERR;
-	strncpy(p->packetContent.error.errMsg, errMsg, strlen(errMsg));
-	p->packetContent.error.errMsg[strlen(errMsg)] = 0;
-	p->packetContent.error.errorCode = e;
+    _ERROR* err = (_ERROR*)((char*)p + sizeof(p->opCode));
+	strncpy(err->errMsg, errMsg, strlen(errMsg));
+	err->errMsg[strlen(errMsg)] = 0;
+	err->errorCode = htons((unsigned short)e);
 
 	m_pTransport->send(m_buff, strlen(errMsg) + 5);
 }
@@ -116,8 +119,9 @@ int TftpServ::sendError(tftpErrorCode_e e, char* errMsg)
 int TftpServ::sendAck()
 {
 	tftpPacket* packet = (tftpPacket*)m_buff;
-	packet->opCode = TFTPOPCODE_ACK;
-	packet->packetContent.ack.block = m_blockNumber;
+	packet->opCode = htons((unsigned short)TFTPOPCODE_ACK);
+    ACK* ack = (ACK*)(packet->packetContent);
+	ack->block = htons(m_blockNumber);
 	m_blockNumber++;
 
 	m_pTransport->send(m_buff, 4)?4:-1; // ack len is 4
@@ -126,7 +130,7 @@ int TftpServ::sendAck()
 bool TftpServ::handleData(DATA* data, int dataLen)
 {
 	// this only happens in wrq
-	if (m_file && data->block == m_blockNumber + 1)
+	if (m_file && data->block == m_blockNumber)
 	{
 		fwrite(data->data, dataLen, 1, m_file);
 		m_blockNumber++;
@@ -152,32 +156,55 @@ bool TftpServ::handleError(_ERROR* err)
 
 void TftpServ::handlePacket(tftpPacket* packet, int packetLen)
 {
-	tftpOpcode_e op = (tftpOpcode_e)packet->opCode;
+	tftpOpcode_e op = (tftpOpcode_e)ntohs((packet->opCode));
 	bool ret = true;
+    cout << "op : " << op << endl;
 	switch (op)
 	{
 	case TFTPOPCODE_ACK:
-		ret = handleAck(&(packet->packetContent.ack));
+    {
+        ACK* ack = (ACK*)(packet->packetContent);
+		ret = handleAck(ack);
 		break;
+    }
 
 	case TFTPOPCODE_DATA:
     {
 		int dataLen = packetLen - sizeof(unsigned short) - sizeof(unsigned short); // opcode len + blockNumber len
-		ret = handleData(&(packet->packetContent.data), dataLen);
+        DATA data;
+        data.block = ntohs(*(unsigned short*)(packet->packetContent));
+        data.data = (char*)(packet->packetContent) + 2;
+		ret = handleData(&data, dataLen);
 		break;
     }
 
 	case TFTPOPCODE_RRQ:
-		ret = handleRrq(&(packet->packetContent.rrq));
+    {
+        RRQ* rrq = (RRQ*)(packet->packetContent);
+        rrq->filename = (char*)rrq;
+        rrq->mode = rrq->filename + strlen(rrq->filename);
+		ret = handleRrq(rrq);
 		break;
+    }
 
 	case TFTPOPCODE_WRQ:
-		ret = handleWrq(&(packet->packetContent.wrq));
+    {
+        WRQ wrq;
+        wrq.filename = (char*)packet->packetContent;
+        wrq.mode = (char*)wrq.filename +  strlen(wrq.filename) + 1;
+		ret = handleWrq(&wrq);
 		break;
+    }
 
 	case TFTPOPCODE_ERR:
-		ret = handleError(&(packet->packetContent.error));
+    {
+        _ERROR* err = (_ERROR*)(packet->packetContent);
+        err->errorCode = *((unsigned short*)(packet->packetContent));
+        err->errorCode = ntohs(err->errorCode);
+        err->errMsg = (char*)(packet->packetContent) + sizeof(err->errorCode);
+		ret = handleError(err);
 		break;
+    }
 
 	default:
 		cout << "WRONG TFTP Operation : " << op << endl;

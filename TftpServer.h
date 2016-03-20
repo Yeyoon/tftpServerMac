@@ -39,14 +39,7 @@ typedef struct _ERROR {
 
 typedef struct tftpPacket {
 	unsigned short opCode;
-	union content 
-	{
-		RRQ		rrq;
-		WRQ     wrq;
-		DATA	data;
-		ACK		ack;
-		_ERROR   error;
-	}packetContent;
+	unsigned char packetContent[0];
 }tftpPacket;
 
 typedef enum {

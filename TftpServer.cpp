@@ -46,6 +46,7 @@ bool TftpServ::handleRrq(RRQ* rrq)
 		return false;
 	}
 
+    m_blockNumber = 0;
 	m_buff_len = fillBufffromFile();
 
 	if (m_buff_len > 0)
@@ -60,7 +61,7 @@ int TftpServ::fillBufffromFile()
 {
 	if (m_file)
 	{
-		return fread(m_buff, TFTP_DATA_LEN, 1, m_file);
+		return fread(m_buff, 1, TFTP_DATA_LEN, m_file);
 	}
 
 	return -1;
@@ -72,10 +73,19 @@ int TftpServ::sendBlockData(int len)
 	tftpPacket* packet;
 	memmove(m_buff + 4, m_buff, len);
 	packet = (tftpPacket*)m_buff;
-	packet->opCode = TFTPOPCODE_DATA;
+	packet->opCode = htons((unsigned short)TFTPOPCODE_DATA);
     DATA* data = (DATA*)((char*)packet + sizeof(packet->opCode));
     data->block = htons(m_blockNumber);
 
+    // for debug
+    #if 0
+    for (int i = 0; i < len + 4; i++)
+    {
+        printf("%02x ",m_buff[i]);
+    }
+    printf("\n");
+    #endif
+    
 	if (m_pTransport->send(m_buff, len+4))	  // total len is datalen + 4
 	{
 		return len;
@@ -100,6 +110,7 @@ bool TftpServ::handleWrq(WRQ* wrq)
 	}
 
 	//return 4 == sendAck();
+    m_blockNumber = 0;
     sendAck();
     return true;
 }
@@ -124,7 +135,15 @@ int TftpServ::sendAck()
 	ack->block = htons(m_blockNumber);
 	m_blockNumber++;
 
-	m_pTransport->send(m_buff, 4)?4:-1; // ack len is 4
+	bool r = m_pTransport->send(m_buff, 4);
+    if (true == r)
+    {
+        return 4;
+    }
+    else
+    {
+        return -1;
+    } // ack len is 4
 }
 
 bool TftpServ::handleData(DATA* data, int dataLen)
@@ -133,7 +152,6 @@ bool TftpServ::handleData(DATA* data, int dataLen)
 	if (m_file && data->block == m_blockNumber)
 	{
 		fwrite(data->data, dataLen, 1, m_file);
-		m_blockNumber++;
 
 		if (dataLen < TFTP_DATA_LEN)
 		{
@@ -158,7 +176,7 @@ void TftpServ::handlePacket(tftpPacket* packet, int packetLen)
 {
 	tftpOpcode_e op = (tftpOpcode_e)ntohs((packet->opCode));
 	bool ret = true;
-    cout << "op : " << op << endl;
+    
 	switch (op)
 	{
 	case TFTPOPCODE_ACK:
@@ -180,10 +198,10 @@ void TftpServ::handlePacket(tftpPacket* packet, int packetLen)
 
 	case TFTPOPCODE_RRQ:
     {
-        RRQ* rrq = (RRQ*)(packet->packetContent);
-        rrq->filename = (char*)rrq;
-        rrq->mode = rrq->filename + strlen(rrq->filename);
-		ret = handleRrq(rrq);
+        RRQ rrq;
+        rrq.filename = (char*)(packet->packetContent);
+        rrq.mode = (char*)rrq.filename + strlen(rrq.filename) + 1;
+		ret = handleRrq(&rrq);
 		break;
     }
 

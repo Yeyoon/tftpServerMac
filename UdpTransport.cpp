@@ -24,7 +24,8 @@ UdpTransport::~UdpTransport()
 
 bool UdpTransport::send(char* data, unsigned int len)
 {
-	return len == sendto(_socket, data, len, 0, (const sockaddr*)&_dstAddr, sizeof(_dstAddr));
+    int slen = sendto(_socket, data, len, 0, (const sockaddr*)&_dstAddr, sizeof(_dstAddr));
+	return len == slen;
 }
 
 
@@ -41,11 +42,14 @@ int UdpTransport::recv(char *buff, unsigned int buf_len)
         cout << strerror(errno) << endl;
     }
     // for debug 
+    #if 0
     for (int i = 0; i < recvLen; i++)
     {
         printf("%02x ",buff[i]);
     }
     printf("\n");
+    #endif
+    
 	if (!connected)
 	{
 		_dstAddr = addr;
